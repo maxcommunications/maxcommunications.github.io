@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>MSK 商品リサーチ</title>
 <style>
 :root{
@@ -309,6 +310,7 @@ input[type="month"]{border:1px solid var(--line); background:var(--surface); col
 </header>
 
 <div class="wrap">
+<div id="sharedBar" class="totbar" style="display:none;"></div>
 <p class="note-est">⚠ 市場規模・粗利率・仕入価格の水準は、公開情報と一般的な相場観に基づく<b>目安(推定値)</b>です。実際の発注前に必ず各仕入れ先へ確認してください。</p>
 
 <!-- ============ 商品リサーチ ============ -->
@@ -360,11 +362,14 @@ input[type="month"]{border:1px solid var(--line); background:var(--surface); col
       <button class="btn ghost" id="btnTriClear">取込データをクリア</button>
       <button class="btn ghost" id="btnBackup">全データをファイルへ保存(引き継ぎ用)</button>
       <button class="btn ghost" id="btnRestore">保存したデータを読み込む</button>
+      <button class="btn ghost" id="btnShareData">全員の共有データとして書き出す(data.json)</button>
       <input type="file" id="restoreFile" accept=".json,application/json" style="display:none;">
     </div>
-    <p class="sub" style="margin-top:6px;">💡 <b>担当者間でデータを共有するには</b>:
-      「全データをファイルへ保存」したファイルを渡せば、受け取った人は「保存したデータを読み込む」で<b>入力の続きから</b>作業できます。
-      原価だけ共有したい場合は下の原価マスタの「共有用にコピー」→ 受け取った人が取込口に貼り付け→「判定する」でOK(貼り付けでバックアップJSONも読み込めます)。</p>
+    <p class="sub" style="margin-top:6px;">💡 <b>全員に同じデータを見せるには(代表者の月1作業)</b>:
+      ① 「全員の共有データとして書き出す」で <b>data.json</b> を保存 →
+      ② <a class="plink" href="https://github.com/maxcommunications/maxcommunications.github.io/upload/main" target="_blank" rel="noopener">このアップロードページ</a>にドラッグして「Commit changes」。
+      以後、URLを開いた人は<b>このデータの続きから</b>始まります(既にデータがある人には画面上部に「共有データを読み込む」ボタンが出ます)。
+      個別の受け渡しは「全データをファイルへ保存」→「保存したデータを読み込む」でもできます。</p>
     <div class="tri-settings">
       <div class="frow"><label for="triMonth">対象月(前月比・3ヶ月推移の記録に使用)</label>
         <input type="month" id="triMonth"></div>
@@ -2368,18 +2373,68 @@ document.getElementById("btnBackup").addEventListener("click", async ()=>{
   else if(r === "cancelled") toast("保存をキャンセルしました");
   else copyText(json, "この環境ではファイル保存ができないため、データをコピーしました。テキストとして共有してください(受け取った人は取込口に貼り付け)");
 });
-function restoreFromJson(txt){
-  let s;
-  try{ s = JSON.parse(txt); }catch(e){ toast("バックアップデータを読み取れませんでした"); return; }
-  if(!s || typeof s !== "object" || !(s.costMaster || s.triBaseMall || s.triBase || s.channels || Array.isArray(s.listedIds))){
-    toast("MSKSHOPツールのバックアップ形式ではないようです"); return; }
-  if(!confirm("保存データを読み込みます。今この画面に入っているデータは上書きされます。よろしいですか?")) return;
+function isToolState(s){
+  return s && typeof s === "object" && (s.costMaster || s.triBaseMall || s.triBase || s.channels || Array.isArray(s.listedIds));
+}
+function applyState(s, msg){
   if(!Array.isArray(s.listedIds)) s.listedIds = [];
   state = s;
   save();
-  toast("データを読み込みました。画面を更新します");
+  toast(msg || "データを読み込みました。画面を更新します");
   setTimeout(()=>location.reload(), 600);
 }
+function restoreFromJson(txt){
+  let s;
+  try{ s = JSON.parse(txt); }catch(e){ toast("バックアップデータを読み取れませんでした"); return; }
+  if(!isToolState(s)){ toast("MSKSHOPツールのバックアップ形式ではないようです"); return; }
+  if(!confirm("保存データを読み込みます。今この画面に入っているデータは上書きされます。よろしいですか?")) return;
+  applyState(s);
+}
+document.getElementById("btnShareData").addEventListener("click", async ()=>{
+  const json = JSON.stringify(Object.assign({}, state, {backupAt: new Date().toISOString()}));
+  const r = await saveFile("data.json", json, "application/json");
+  if(r === "saved") toast("共有データ(data.json)を保存しました。説明のアップロードページに上げると全員に反映されます");
+  else if(r === "cancelled") toast("保存をキャンセルしました");
+  else copyText(json, "この環境ではファイル保存ができないため、データをコピーしました");
+});
+/* ---- 公開URLの共有データ(data.json)を自動読み込み ---- */
+(async function loadSharedData(){
+  if(!/^https?:$/.test(location.protocol)) return; // 配布ファイル(file://)では対象外
+  let shared;
+  try{
+    const res = await fetch("data.json?v=" + Date.now(), {cache: "no-store"});
+    if(!res.ok) return;
+    shared = await res.json();
+  }catch(e){ return; }
+  if(!isToolState(shared) || !(shared.costMaster || shared.triBaseMall || shared.channels)) return;
+  const hasLocal = (state.triBase && state.triBase.length) || Object.keys(state.costMaster || {}).length > 0;
+  if(!hasLocal){
+    // まだ何も入っていない端末 → 共有データからスタート
+    shared.sharedLoadedAt = shared.backupAt || "";
+    if(!Array.isArray(shared.listedIds)) shared.listedIds = [];
+    state = shared;
+    save();
+    setTimeout(()=>location.reload(), 200);
+    return;
+  }
+  if(shared.backupAt && shared.backupAt !== state.sharedLoadedAt){
+    const bar = document.getElementById("sharedBar");
+    if(!bar) return;
+    bar.style.display = "";
+    bar.innerHTML = `<span>📥 新しい共有データ(${(shared.backupAt || "").slice(0, 10)} 保存)が公開されています。読み込むと今この端末に入っているデータは置き換わります。</span>
+      <button class="btn" id="btnSharedLoad" type="button">共有データを読み込む</button>
+      <button class="btn ghost" id="btnSharedSkip" type="button">今回は読み込まない</button>`;
+    document.getElementById("btnSharedLoad").addEventListener("click", ()=>{
+      shared.sharedLoadedAt = shared.backupAt;
+      applyState(shared, "共有データを読み込みました。画面を更新します");
+    });
+    document.getElementById("btnSharedSkip").addEventListener("click", ()=>{
+      state.sharedLoadedAt = shared.backupAt;
+      save();
+      bar.style.display = "none";
+    });
+  }
+})();
 document.getElementById("btnRestore").addEventListener("click", ()=>document.getElementById("restoreFile").click());
 document.getElementById("restoreFile").addEventListener("change", async e=>{
   const f = (e.target.files || [])[0];

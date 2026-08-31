@@ -297,6 +297,7 @@ input[type="month"]{border:1px solid var(--line); background:var(--surface); col
       <span class="brand">MSK SHOP</span>
       <h1>商品リサーチ<span class="ac">Lab</span></h1>
       <span class="tagline">月商1億円へ — 何を仕入れて、何を出品するか</span>
+      <span class="tagline" id="syncBadge" style="margin-left:8px;"></span>
     </div>
     <nav class="tabs" role="tablist">
       <button class="tab" role="tab" aria-selected="true" data-p="research">商品リサーチ</button>
@@ -702,7 +703,10 @@ const PRODUCTS = [
 const LS_KEY = "msk-research-v1";
 let state = {listedIds: [], csvCount: 0};
 try{ const s = JSON.parse(localStorage.getItem(LS_KEY)); if(s && Array.isArray(s.listedIds)) state = s; }catch(e){}
-const save = () => { try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){} };
+const save = () => {
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){}
+  try{ if(typeof schedulePush === "function") schedulePush(); }catch(e){}
+};
 const listed = () => new Set(state.listedIds);
 
 const NOW_M = new Date().getMonth() + 1;
@@ -977,6 +981,7 @@ function doImportText(txt){
   state.channels[curCh] = { count: items.length, revenue: revSum };
   const chSum = channelTotal();
   if(chSum > 0) state.currentRev = chSum;
+  state.importAt = new Date().toISOString();
   save();
   const top = items.filter(x=>x.r>0).sort((a,b)=>b.r-a.r).slice(0,3);
   let msg = `<b>${CH_LABEL[curCh]}</b>として <b>${items.length.toLocaleString()}件</b> を読み込みました(エラー0)。このツールの <b>${hit.size}品</b> と一致し「出品中」になりました。`;
@@ -1441,9 +1446,10 @@ function upsertMaster(rec){
       merged.from = rec.from || today;
     }
     merged.updated = today;
+    merged.ts = Date.now(); // 同期マージ判定用(新しい入力が勝つ)
     state.costMaster[key] = merged;
   } else {
-    state.costMaster[key] = Object.assign({hist:[], updated:today, from:rec.from || today}, rec);
+    state.costMaster[key] = Object.assign({hist:[], updated:today, from:rec.from || today, ts:Date.now()}, rec);
   }
 }
 function triParseMaster(rows){
@@ -1623,6 +1629,7 @@ function triImportRows(rows, srcName){
   }
   if(isTermReport(head)){
     state.triTerms = triParseTerms(rows);
+    state.importAt = new Date().toISOString();
     save();
     toast("検索用語レポートと自動判別: " + state.triTerms.count.toLocaleString() + "語を集計しました");
     renderTriStatus(); renderTerms();
@@ -1635,6 +1642,7 @@ function triImportRows(rows, srcName){
       : head.some(h=>/商品管理番号|実績額|rpp/i.test(h)) ? "rakuten" : "amazon";
     state.triAdsMall = state.triAdsMall || {};
     state.triAdsMall[adMall] = triParseAds(rows);
+    state.importAt = new Date().toISOString();
     save();
     toast("広告商品レポート(" + MALL_LABEL[adMall] + ")と自動判別: " +
       state.triAdsMall[adMall].count.toLocaleString() + "行を集計しました");
@@ -1666,6 +1674,7 @@ function triImportRows(rows, srcName){
       revenue: Math.round(items.reduce((a,x)=>a+x.sales, 0)) };
     const chSum = channelTotal();
     if(chSum > 0) state.currentRev = chSum;
+    state.importAt = new Date().toISOString();
     save();
     const gc = document.getElementById("gCur");
     if(gc && chSum > 0) gc.value = chSum;
@@ -2378,6 +2387,7 @@ function isToolState(s){
 }
 function applyState(s, msg){
   if(!Array.isArray(s.listedIds)) s.listedIds = [];
+  s.importAt = new Date().toISOString(); // 復元を最新データとして扱う
   state = s;
   save();
   toast(msg || "データを読み込みました。画面を更新します");
@@ -2435,6 +2445,147 @@ document.getElementById("btnShareData").addEventListener("click", async ()=>{
     });
   }
 })();
+/* ==== リアルタイム全員共有(Firebase Firestore 同期) ==== */
+const FB_KEY = "AIzaSyDFrM4nhzDcsuBrnKh_UAFgTk7c11ozTHg";
+const FB_DOC = "https://firestore.googleapis.com/v1/projects/msk-tool/databases/(default)/documents/shared/state";
+let pushTimer = null, syncApplying = false, syncSeenAt = "", syncFirstPull = true, lastInputAt = 0;
+document.addEventListener("input", ()=>{ lastInputAt = Date.now(); }, true);
+function deviceId(){
+  try{
+    let id = localStorage.getItem("msk-device-id");
+    if(!id){ id = "d" + Math.random().toString(36).slice(2, 10); localStorage.setItem("msk-device-id", id); }
+    return id;
+  }catch(e){ return "d0"; }
+}
+async function gzB64(txt){
+  const stream = new Blob([txt]).stream().pipeThrough(new CompressionStream("gzip"));
+  const u8 = new Uint8Array(await new Response(stream).arrayBuffer());
+  let bin = "";
+  for(let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+async function unGzB64(b64){
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  const stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return await new Response(stream).text();
+}
+function setSyncBadge(txt, ok){
+  const el = document.getElementById("syncBadge");
+  if(el){ el.textContent = txt; el.style.color = ok ? "var(--accent)" : "var(--faint)"; }
+}
+async function fbGet(){
+  const r = await fetch(FB_DOC + "?key=" + FB_KEY, {cache: "no-store"});
+  if(r.status === 404) return null; // ドキュメント(またはDB)がまだ無い
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  const f = (await r.json()).fields || {};
+  const data = f.data && f.data.stringValue;
+  if(!data) return null;
+  const txt = (f.enc && f.enc.stringValue) === "gz" ? await unGzB64(data) : data;
+  return {state: JSON.parse(txt), savedAt: (f.savedAt && f.savedAt.stringValue) || "", by: (f.by && f.by.stringValue) || ""};
+}
+async function fbPut(s, savedAt){
+  const txt = JSON.stringify(s);
+  let payload = txt, enc = "raw";
+  if(typeof CompressionStream !== "undefined"){ payload = await gzB64(txt); enc = "gz"; }
+  const r = await fetch(FB_DOC + "?key=" + FB_KEY, {method: "PATCH",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({fields: {
+      data: {stringValue: payload}, enc: {stringValue: enc},
+      savedAt: {stringValue: savedAt}, by: {stringValue: deviceId()}}})});
+  if(!r.ok) throw new Error("HTTP " + r.status);
+}
+function mergeCost(a, b){ // 両方の原価マスタを統合(同じ商品は新しい入力が勝つ)
+  const out = Object.assign({}, a || {});
+  Object.entries(b || {}).forEach(([k, rec])=>{
+    const cur = out[k];
+    if(!cur || (rec.ts || 0) > (cur.ts || 0) || (!(rec.ts || cur.ts) && String(rec.updated || "") >= String(cur.updated || ""))) out[k] = rec;
+  });
+  return out;
+}
+const SYNC_SALES_KEYS = ["triBaseMall","triBase","triAdsMall","triAds","triTerms","snapshots","channels","currentRev","triMonth","listedIds","csvCount","importAt","sharedLoadedAt"];
+function mergeStates(local, remote){
+  const out = Object.assign({}, remote);
+  out.costMaster = mergeCost(remote.costMaster, local.costMaster);
+  const localHasSales = !!(local.triBase && local.triBase.length);
+  const remoteHasSales = !!(remote.triBase && remote.triBase.length);
+  // 取込データは「新しく取り込んだ方」が勝つ。片方にしか無い場合はある方を守る
+  if(String(local.importAt || "") > String(remote.importAt || "") || (localHasSales && !remoteHasSales)){
+    SYNC_SALES_KEYS.forEach(k=>{ if(local[k] !== undefined) out[k] = local[k]; else delete out[k]; });
+  }
+  ["feeAmazon","feeRakuten","costDefault"].forEach(k=>{ if(local[k] !== undefined) out[k] = local[k]; });
+  if(!Array.isArray(out.listedIds)) out.listedIds = [];
+  return out;
+}
+function isTypingNow(){
+  const el = document.activeElement;
+  return el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && (Date.now() - lastInputAt) < 60000;
+}
+function hasAnyData(s){
+  return (s.triBase && s.triBase.length) || Object.keys(s.costMaster || {}).length ||
+    Object.keys(s.channels || {}).length || (s.listedIds && s.listedIds.length);
+}
+function rerenderAll(){
+  ["renderTriage","renderMaster","renderAdDetail","renderTerms","renderChSummary","renderGoal","render","renderSuggest"]
+    .forEach(n=>{ try{ if(typeof window[n] === "function") window[n](); }catch(e){} });
+}
+function schedulePush(){
+  if(syncApplying) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(doPush, 4000);
+}
+async function doPush(){
+  try{
+    const remote = await fbGet();
+    const out = remote && remote.state ? mergeStates(state, remote.state) : Object.assign({}, state);
+    const savedAt = new Date().toISOString();
+    delete out.backupAt;
+    await fbPut(out, savedAt);
+    const changed = JSON.stringify(out) !== JSON.stringify(state);
+    syncApplying = true;
+    state = out; syncSeenAt = savedAt; save();
+    syncApplying = false;
+    if(changed && !isTypingNow()) rerenderAll();
+    setSyncBadge("☁ 全員共有: オン(" + new Date(savedAt).toTimeString().slice(0, 5) + " 送信済)", true);
+  }catch(e){
+    setSyncBadge("☁ 共有オフ: この端末内のみ保存中", false);
+  }
+}
+async function doPull(){
+  try{
+    const remote = await fbGet();
+    if(remote === null){
+      if(hasAnyData(state)){ await doPush(); } // クラウド側が空 → この端末のデータを初期登録
+      else setSyncBadge("☁ 全員共有: 待機中", true);
+      syncFirstPull = false;
+      return;
+    }
+    if(remote.savedAt && remote.savedAt !== syncSeenAt){
+      if(isTypingNow()) return; // 入力中は邪魔しない(次の周期で反映)
+      const merged = mergeStates(state, remote.state);
+      const changedForMe = JSON.stringify(merged) !== JSON.stringify(state);
+      syncApplying = true;
+      state = merged; syncSeenAt = remote.savedAt; save();
+      syncApplying = false;
+      if(changedForMe){
+        rerenderAll();
+        if(!syncFirstPull && remote.by !== deviceId()) toast("共有データを受信して画面を更新しました");
+      }
+      // この端末にしか無かった入力があればクラウドへ送り返す
+      if(JSON.stringify(merged) !== JSON.stringify(remote.state)) schedulePush();
+    }
+    setSyncBadge("☁ 全員共有: オン", true);
+    syncFirstPull = false;
+  }catch(e){
+    setSyncBadge("☁ 共有オフ: 接続待ち", false);
+  }
+}
+setSyncBadge("☁ 共有: 接続中…", true);
+doPull();
+setInterval(()=>{ if(!document.hidden) doPull(); }, 30000);
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) doPull(); });
+window.addEventListener("online", ()=>doPull());
 document.getElementById("btnRestore").addEventListener("click", ()=>document.getElementById("restoreFile").click());
 document.getElementById("restoreFile").addEventListener("change", async e=>{
   const f = (e.target.files || [])[0];
@@ -2451,7 +2602,9 @@ document.getElementById("btnTriTemplate").addEventListener("click", ()=>{
 });
 document.getElementById("btnTriClear").addEventListener("click", ()=>{
   delete state.triBase; delete state.triBaseMall; delete state.triAds; delete state.triAdsMall;
-  delete state.triage; delete state.triTerms; save();
+  delete state.triage; delete state.triTerms;
+  state.importAt = new Date().toISOString();
+  save();
   document.getElementById("triText").value = "";
   document.getElementById("triResultWrap").style.display = "none";
   renderTriStatus(); renderTerms(); renderMaster(); renderAdDetail();

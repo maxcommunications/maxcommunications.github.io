@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/csmaeda-app-demo/sw.js', { scope: '/csmaeda-app-demo/' })})}

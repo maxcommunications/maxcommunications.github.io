@@ -1,0 +1,17 @@
+{
+  "name": "スペースシステムズ 公式アプリ",
+  "short_name": "スペースシステムズ",
+  "description": "写真で相談、AI相談、施工事例、家のカルテ、点検のお知らせ。株式会社スペースシステムズ（金沢・小松）の公式アプリ",
+  "start_url": "/space-systems-app/",
+  "scope": "/space-systems-app/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F8F6F1",
+  "theme_color": "#16202B",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

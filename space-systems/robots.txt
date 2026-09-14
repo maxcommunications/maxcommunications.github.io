@@ -1,0 +1,7 @@
+User-Agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api/
+
+Host: https://maxcommunications.github.io/space-systems
+Sitemap: https://maxcommunications.github.io/space-systems/sitemap.xml

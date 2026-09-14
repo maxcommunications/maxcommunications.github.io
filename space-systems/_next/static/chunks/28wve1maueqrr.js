@@ -1,0 +1,1 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,80166,c=>{"use strict";var t=c.i(43476),e=c.i(14678);c.s(["TrackClick",0,function({event:c,props:i,children:s,className:l}){let{track:n}=(0,e.useAnalytics)();return(0,t.jsx)("span",{className:l,onClickCapture:()=>n(c,i),children:s})}])}]);

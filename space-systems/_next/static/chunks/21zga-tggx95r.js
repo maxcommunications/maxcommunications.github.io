@@ -1,0 +1,1 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,90592,t=>{"use strict";var a=t.i(43476),e=t.i(18566),i=t.i(73786);t.s(["ConsultChat",0,function(){let t=(0,e.useSearchParams)();return(0,a.jsx)(i.ChatPanel,{variant:"page",initialPrompt:t.get("q")})}])}]);

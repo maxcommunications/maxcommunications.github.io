@@ -95,6 +95,8 @@ ${I.join(`
   function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("on"), 2600); }
 
   // ── ルーティング ──
+  // ?p=/path 形式（ハッシュが落ちる環境向け）を #/path に変換
+  (function () { try { const qp = new URLSearchParams(location.search).get("p"); if (qp && qp.startsWith("/")) history.replaceState(null, "", location.pathname + "#" + qp); } catch {} })();
   function parse() {
     const h = location.hash.replace(/^#/, "") || "/";
     const [path, qs = ""] = h.split("?");

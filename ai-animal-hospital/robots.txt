@@ -1,0 +1,6 @@
+User-Agent: *
+Allow: /
+Disallow: /api/
+
+Host: https://aianimalhospital.com
+Sitemap: https://aianimalhospital.com/sitemap.xml

@@ -1,3 +1,3 @@
-:HL["/ai-animal-hospital/_next/static/chunks/407s1cwukvi8j.css","style"]
+:HL["/ai-animal-hospital/_next/static/chunks/26o5t98m_7wp2.css","style"]
 :HL["/ai-animal-hospital/_next/static/media/e92885b6572bd90a-s.p.2aqjjuibrahv7.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
-0:{"tree":{"name":"","param":null,"prefetchHints":4112,"slots":{"children":{"name":"contact","param":null,"prefetchHints":4160,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":4256,"slots":null}}}}},"staleTime":300,"buildId":"fJ_1boX_ifKf66JKzrNl-"}
+0:{"tree":{"name":"","param":null,"prefetchHints":4112,"slots":{"children":{"name":"contact","param":null,"prefetchHints":4160,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":4256,"slots":null}}}}},"staleTime":300,"buildId":"mglDE4ZdfHCDCFCQvHpzM"}
